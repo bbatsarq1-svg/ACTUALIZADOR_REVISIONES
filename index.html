@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subir revisión</title>
+<style>
+  :root { --tinta:#1a0505; --rojo:#ff3414; --gris:#efefef; --punto:1px dotted #8a8a8a; }
+  * { box-sizing:border-box; margin:0; }
+  body { color:var(--tinta); background:#fff; font:14px/1.5 "Helvetica Neue",Arial,sans-serif; }
+  .mono { font:12px/1.6 ui-monospace,"SF Mono",Consolas,monospace; text-transform:uppercase; }
+  h1,h2,.num { font-weight:800; letter-spacing:-.045em; line-height:.9; text-transform:uppercase; }
+  h1 { font-size:clamp(56px,13vw,190px); } h2 { font-size:clamp(26px,4vw,48px); line-height:1; }
+  .marco { max-width:1280px; margin:0 auto; border-inline:var(--punto); }  /* líneas punteadas a los lados */
+  .fila { border-top:var(--punto); padding:28px; position:relative; }
+  .fila::before { content:""; position:absolute; top:-3px; left:-3px; width:5px; height:5px; background:var(--rojo); } /* cuadrito rojo en la esquina */
+  header.fila { display:flex; justify-content:space-between; align-items:center; border-top:0; padding:14px 28px; }
+  header.fila::before { display:none; } .logo { font-weight:800; font-size:18px; letter-spacing:-.03em; }
+  .dos { display:grid; grid-template-columns:1fr 1fr; gap:28px; } .dos > div:first-child { border-right:var(--punto); padding-right:28px; }
+  .btn { font:600 13px/1 "Helvetica Neue",Arial,sans-serif; padding:14px 22px; border:1px dotted var(--tinta); background:#fff; color:var(--tinta); cursor:pointer; }
+  .btn.rojo { background:var(--rojo); border:1px solid var(--rojo); color:#fff; } .btn:disabled { opacity:.35; cursor:default; }
+  #zona { border:1px dotted var(--tinta); min-height:150px; display:grid; place-items:center; text-align:center; padding:24px; cursor:pointer; }
+  #zona.sobre { background:var(--gris); } label { display:block; margin:14px 0 4px; }
+  input { width:100%; padding:12px; border:var(--punto); font:13px ui-monospace,Consolas,monospace; color:var(--tinta); background:#fff; }
+  .botones { display:flex; gap:12px; margin-top:22px; flex-wrap:wrap; }
+  .fichas { display:grid; grid-template-columns:repeat(3,1fr); } .ficha { padding:24px; min-height:190px; display:flex; flex-direction:column; justify-content:space-between; }
+  .ficha .num { font-size:clamp(48px,8vw,110px); } .ficha.rojo { background:var(--rojo); color:#fff; } .ficha.gris { background:var(--gris); }
+  .item { padding:10px 0; border-bottom:var(--punto); } .item b { font-weight:600; } .AVISO { color:#a64b00; } .ERROR { color:#c20000; font-weight:700; }
+  footer { background:#0b0b0b; color:#fff; padding:28px 28px 0; margin-top:40px; overflow:hidden; }
+  footer .gigante { font-size:clamp(70px,20vw,300px); font-weight:800; letter-spacing:-.06em; line-height:.8; margin-bottom:-.12em; }
+  @media (max-width:760px) { .dos,.fichas { grid-template-columns:1fr; } .dos > div:first-child { border:0; padding:0; } }
+</style>
+</head>
+<body>
+<div class="marco">
+  <header class="fila"><span class="logo">▞ SUBIR REVISIÓN</span><span class="mono">Todo se procesa en tu navegador · nada se sube</span></header>
+
+  <section class="fila"><h1>Actualiza<br>Docs.</h1></section>
+
+  <section class="fila dos">
+    <div></div>
+    <div><h2>No modifica contenido.<br>actualiza revisión & Fecha.</h2><p class="mono" style="margin-top:18px">Arrastra los Word y Excel que están en la misma revisión.<br>Elige la letra nueva y la fecha.<br>Simula y descarga el .zip con los archivos nuevos.<br>Los originales no se tocan.</p></div>
+  </section>
+
+  <section class="fila dos">
+    <div>
+      <h2>1. Archivos</h2><br>
+      <div id="zona" class="mono">Arrastra aquí los .docx y .xlsx<br>o haz clic para elegirlos<div id="cuenta" style="margin-top:10px;color:var(--rojo)"></div></div>
+      <input id="elegir" type="file" multiple accept=".docx,.xlsx" hidden>
+    </div>
+    <div>
+      <h2>2. Revisión</h2>
+      <label class="mono">Letra nueva</label><input id="rev" maxlength="1" placeholder="LETRA DE REVISIÓN">
+      <label class="mono">Fecha</label><input id="fecha" type="date">
+      <label class="mono">Elaborado / Revisado / Aceptado (opcional: si lo dejas vacío se copia de la fila anterior)</label>
+      <input id="el" placeholder="Elaborado por"><input id="re" placeholder="Revisado por" style="margin-top:6px"><input id="ac" placeholder="Aceptado por" style="margin-top:6px">
+      <div class="botones"><button class="btn" id="simular">Revisar (simular)</button><button class="btn rojo" id="generar">Generar .zip</button></div>
+      <p id="error" class="mono ERROR" style="margin-top:12px"></p>
+    </div>
+  </section>
+
+  <section class="fichas fila" style="padding:0" id="fichas" hidden>
+    <div class="ficha rojo"><span class="num" id="nOk">0</span><span class="mono">Archivos listos</span></div>
+    <div class="ficha gris"><span class="num" id="nErr">0</span><span class="mono">Con error (no se generan)</span></div>
+    <div class="ficha"><span class="num" id="nOmi">0</span><span class="mono">Omitidos</span></div>
+  </section>
+  <section class="fila" id="informe" hidden><h2>Informe</h2><div id="lista" class="mono" style="margin-top:18px"></div></section>
+</div>
+<footer><div class="mono">Dev. VAMB 05-10-2026</div><div class="gigante">Bbats</div></footer>
+
+<script src="jszip.min.js"></script>
+<script src="app.js"></script>
+<script>
+  // ---- Interfaz: solo conecta la página con app.js ----
+  const $ = s => document.querySelector(s);
+  let archivos = [];
+
+  function agregar(lista) {
+    for (const f of lista)
+      if (/\.(docx|xlsx)$/i.test(f.name) && !f.name.startsWith("~$") && !archivos.some(a => a.name === f.name)) archivos.push(f);
+    $("#cuenta").textContent = archivos.length ? `${archivos.length} archivos cargados` : "";
+  }
+  $("#zona").onclick = () => $("#elegir").click();
+  $("#elegir").onchange = e => agregar(e.target.files);
+  $("#zona").ondragover = e => { e.preventDefault(); $("#zona").classList.add("sobre"); };
+  $("#zona").ondragleave = () => $("#zona").classList.remove("sobre");
+  $("#zona").ondrop = e => { e.preventDefault(); $("#zona").classList.remove("sobre"); agregar(e.dataTransfer.files); };
+
+  async function ejecutar(simular) {
+    $("#error").textContent = "";
+    const nueva = $("#rev").value.trim().toUpperCase(), fecha = aFecha($("#fecha").value.split("-").reverse().join("-"));
+    if (!archivos.length) return ($("#error").textContent = "Primero carga archivos.");
+    if (!/^[A-Z]$/.test(nueva) || fecha === null) return ($("#error").textContent = "Indica una letra (A-Z) y una fecha válida.");
+    const firmas = ["#el", "#re", "#ac"].map(id => $(id).value.trim()), resultados = [];
+    for (const f of archivos) resultados.push(await procesar(f.name, new Uint8Array(await f.arrayBuffer()), { nueva, fecha, firmas, simular }));
+
+    const n = e => resultados.filter(r => r.estado === e).length;
+    $("#nOk").textContent = n("OK"); $("#nErr").textContent = n("ERROR"); $("#nOmi").textContent = n("OMITIDO");
+    $("#lista").innerHTML = resultados.map(r => `<div class="item"><b>${{ OK: "✔", ERROR: "✖", OMITIDO: "·" }[r.estado]} ${r.nombre}</b>` +
+      r.msgs.map(([nivel, t]) => `<div class="${nivel}">&nbsp;&nbsp;&nbsp;${nivel}: ${t.replace(/</g, "&lt;")}</div>`).join("") + "</div>").join("");
+    $("#fichas").hidden = $("#informe").hidden = false;
+    $("#informe").scrollIntoView({ behavior: "smooth" });
+
+    if (!simular && n("OK")) { // .zip con los archivos nuevos + el informe
+      const zip = new JSZip();
+      resultados.forEach(r => r.salida && zip.file(r.salida.nombre, r.salida.bytes));
+      zip.file("informe_revision.txt", informe(resultados, false));
+      const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(await zip.generateAsync({ type: "blob" })), download: `_rev_${nueva}.zip` });
+      a.click();
+    }
+  }
+  $("#simular").onclick = () => ejecutar(true);
+  $("#generar").onclick = () => ejecutar(false);
+</script>
+</body>
+</html>
