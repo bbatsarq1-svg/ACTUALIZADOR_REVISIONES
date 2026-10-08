@@ -21,7 +21,7 @@
   .btn.rojo { background:var(--rojo); border:1px solid var(--rojo); color:#fff; } .btn:disabled { opacity:.35; cursor:default; }
   #zona { border:1px dotted var(--tinta); min-height:150px; display:grid; place-items:center; text-align:center; padding:24px; cursor:pointer; }
   #zona.sobre { background:var(--gris); } label { display:block; margin:14px 0 4px; }
-  input { width:100%; padding:12px; border:var(--punto); font:13px ui-monospace,Consolas,monospace; color:var(--tinta); background:#fff; }
+  input, textarea { width:100%; padding:12px; border:var(--punto); font:13px ui-monospace,Consolas,monospace; color:var(--tinta); background:#fff; }
   .botones { display:flex; gap:12px; margin-top:22px; flex-wrap:wrap; }
   .fichas { display:grid; grid-template-columns:repeat(3,1fr); } .ficha { padding:24px; min-height:190px; display:flex; flex-direction:column; justify-content:space-between; }
   .ficha .num { font-size:clamp(48px,8vw,110px); } .ficha.rojo { background:var(--rojo); color:#fff; } .ficha.gris { background:var(--gris); }
@@ -42,6 +42,8 @@
     <div><h2>No modifica contenido.<br>actualiza revisión & Fecha.</h2><p class="mono" style="margin-top:18px">Arrastra los Word y Excel que están en la misma revisión.<br>Elige la letra nueva y la fecha.<br>Simula y descarga el .zip con los archivos nuevos.<br>Los originales no se tocan.</p></div>
   </section>
 
+  <nav class="fila botones" style="margin-top:0"><button class="btn" data-tab="rev">Revisión</button><button class="btn" data-tab="dic">Diccionario</button></nav>
+  <div id="t-rev">
   <section class="fila dos">
     <div>
       <h2>1. Archivos</h2><br>
@@ -52,6 +54,7 @@
       <h2>2. Revisión</h2>
       <label class="mono">Letra nueva</label><input id="rev" maxlength="1" placeholder="LETRA DE REVISIÓN">
       <label class="mono">Fecha</label><input id="fecha" type="date">
+      <label class="mono">Línea de concesión (se verifica y se reemplaza al generar)</label><input id="con" value="CONCESIÓN AEROPUERTO DESIERTO DE ATACAMA">
       <label class="mono">Elaborado / Revisado / Aceptado (opcional: si lo dejas vacío se copia de la fila anterior)</label>
       <input id="el" placeholder="Elaborado por"><input id="re" placeholder="Revisado por" style="margin-top:6px"><input id="ac" placeholder="Aceptado por" style="margin-top:6px">
       <div class="botones"><button class="btn" id="simular">Revisar (simular)</button><button class="btn rojo" id="generar">Generar .zip</button></div>
@@ -65,6 +68,15 @@
     <div class="ficha"><span class="num" id="nOmi">0</span><span class="mono">Omitidos</span></div>
   </section>
   <section class="fila" id="informe" hidden><h2>Informe</h2><div id="lista" class="mono" style="margin-top:18px"></div></section>
+  </div>
+  <section class="fila" id="t-dic" hidden>
+    <h2>Diccionario</h2>
+    <p class="mono" style="margin:14px 0">Una línea por entrada: CÓDIGO = NOMBRE. Especialidad vacía = no aparece en el título.<br>Título del documento: documento - especialidad - infraestructura. Se guarda en este navegador; exporta para respaldar.</p>
+    <div class="botones" style="margin:0 0 18px"><button class="btn" id="importar">Importar (.xlsx o .json)</button><button class="btn" id="exportar">Exportar .json</button></div>
+    <input id="impArchivo" type="file" accept=".xlsx,.json" hidden>
+    <div class="dos"><div><label class="mono">Infraestructura (código = nombre)</label><textarea id="d-infra" rows="16"></textarea></div>
+    <div><label class="mono">Especialidad (código = nombre)</label><textarea id="d-esp" rows="4"></textarea><label class="mono">Documento (SUBESP-TIPO = nombre)</label><textarea id="d-doc" rows="9"></textarea></div></div>
+  </section>
 </div>
 <footer><div class="mono">Dev. VAMB 05-10-2026</div><div class="gigante">Bbats</div></footer>
 
@@ -74,6 +86,26 @@
   // ---- Interfaz: solo conecta la página con app.js ----
   const $ = s => document.querySelector(s);
   let archivos = [];
+
+  // ---- Diccionario: tres cuadros de texto "CÓDIGO = NOMBRE", guardados en el navegador ----
+  const aTexto = o => Object.entries(o).map(([k, v]) => `${k} = ${v}`).join("\n");
+  const aObjeto = t => Object.fromEntries(t.split("\n").filter(l => l.includes("=")).map(l => [l.slice(0, l.indexOf("=")).trim().toUpperCase(), l.slice(l.indexOf("=") + 1).trim()]));
+  const leerDic = () => ({ infra: aObjeto($("#d-infra").value), esp: aObjeto($("#d-esp").value), doc: aObjeto($("#d-doc").value) });
+  const pintarDic = d => { $("#d-infra").value = aTexto(d.infra); $("#d-esp").value = aTexto(d.esp); $("#d-doc").value = aTexto(d.doc); };
+  const guardarDic = () => { try { localStorage.setItem("dic", JSON.stringify(leerDic())); } catch {} };
+  let guardado = null; try { guardado = JSON.parse(localStorage.getItem("dic")); } catch {}
+  pintarDic(guardado || DIC_INICIAL);
+  ["#d-infra", "#d-esp", "#d-doc"].forEach(id => ($(id).oninput = guardarDic));
+  $("#importar").onclick = () => $("#impArchivo").click();
+  $("#impArchivo").onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const d = leerDic();
+    if (/\.json$/i.test(f.name)) Object.assign(d, JSON.parse(await f.text()));
+    else d.infra = { ...d.infra, ...(await leerDiccionarioXlsx(new Uint8Array(await f.arrayBuffer()))) }; // el .xlsx trae solo infraestructuras
+    pintarDic(d); guardarDic(); e.target.value = "";
+  };
+  $("#exportar").onclick = () => Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([JSON.stringify(leerDic(), null, 1)], { type: "application/json" })), download: "diccionario.json" }).click();
+  document.querySelectorAll("[data-tab]").forEach(b => (b.onclick = () => { $("#t-rev").hidden = b.dataset.tab !== "rev"; $("#t-dic").hidden = b.dataset.tab !== "dic"; }));
 
   function agregar(lista) {
     for (const f of lista)
@@ -89,10 +121,12 @@
   async function ejecutar(simular) {
     $("#error").textContent = "";
     const nueva = $("#rev").value.trim().toUpperCase(), fecha = aFecha($("#fecha").value.split("-").reverse().join("-"));
+    const concesion = $("#con").value.trim(), dic = leerDic();
+    if (!concesion) return ($("#error").textContent = "Indica la línea de concesión.");
     if (!archivos.length) return ($("#error").textContent = "Primero carga archivos.");
     if (!/^[A-Z]$/.test(nueva) || fecha === null) return ($("#error").textContent = "Indica una letra (A-Z) y una fecha válida.");
     const firmas = ["#el", "#re", "#ac"].map(id => $(id).value.trim()), resultados = [];
-    for (const f of archivos) resultados.push(await procesar(f.name, new Uint8Array(await f.arrayBuffer()), { nueva, fecha, firmas, simular }));
+    for (const f of archivos) resultados.push(await procesar(f.name, new Uint8Array(await f.arrayBuffer()), { nueva, fecha, firmas, simular, dic, concesion }));
 
     const n = e => resultados.filter(r => r.estado === e).length;
     $("#nOk").textContent = n("OK"); $("#nErr").textContent = n("ERROR"); $("#nOmi").textContent = n("OMITIDO");

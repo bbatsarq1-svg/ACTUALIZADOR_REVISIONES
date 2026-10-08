@@ -5,6 +5,17 @@
 const NOMBRE = /^(?<codigo>[A-Z]{4}-[A-Z]{2}-[A-Z]{3}-[A-Z]{3}-[A-Z]{3}-[A-Z]{3}-\d{4})-(?<rev>[A-Z])$/;
 const TIPOS_PIE = { CRD: "CRITERIOS DE DISEÑO", ETT: "ESPECIFICACIONES TÉCNICAS", MEM: "MEMORIA" };
 const PLACEHOLDER = "CÓDIGO DOCUMENTO";
+// ---- DICCIONARIO (se edita en la pestaña "Diccionario") ----
+const DIC_INICIAL = {
+  infra: { TWR: "REMODELACIÓN Y NORMALIZACIÓN TORRE DE CONTROL (TWR)", BAS: "SALAS DE BASURA", CAN: "NUEVOS CANILES SERVICIOS PÚBLICOS", PCA: "CASETA CONTROL DE ACCESO DGAC" }, // código -> nombre
+  esp: { ARQ: "", ACU: "ACÚSTICO" },  // vacío = la especialidad no aparece en el título
+  doc: { "GEN-CRD": "CRITERIOS DE DISEÑO", "GEN-ETT": "ESPECIFICACIONES TÉCNICAS", "GEN-MEM": "MEMORIA", "GEN-LDO": "PROGRAMA ARQUITECTÓNICO", "MOB-LDO": "LISTADO DE MOBILIARIO", "PUE-LDO": "LISTADO DE PUERTAS", "SUP-ANX": "SUPERFICIES COMPARADAS" }, // SUBESP-TIPO -> nombre
+};
+function tituloDoc(codigo, dic) { // "documento - especialidad - infraestructura" (la especialidad vacía, p. ej. ARQ, no aparece)
+  const [, , infra, esp, sub, tipo] = codigo.split("-");
+  const piezas = [["documento", `${sub}-${tipo}`, dic.doc], ["especialidad", esp, dic.esp], ["infraestructura", infra, dic.infra]].map(([n, k, t]) => [n, k, t[k]]);
+  return { titulo: piezas.map(x => x[2]).filter(Boolean).join(" - "), falta: piezas.filter(x => x[2] === undefined || (!x[2] && x[0] !== "especialidad")).map(x => `${x[0]} ${x[1]}`) };
+}
 const FILAS_EXCEL = [22, 23, 24, 25, 26]; // tabla de revisiones en PORTADA (columnas B..F)
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -16,6 +27,12 @@ const PARTES_WORD = /^word\/(document|header\d*|footer\d*)\.xml$/;
 const hijos = (el, tag) => Array.from(el.childNodes).filter(n => n.localName === tag);
 const todos = (el, ns, tag) => Array.from(el.getElementsByTagNameNS(ns, tag));
 const texto = el => [...todos(el, W, "t"), ...todos(el, M, "t")].map(t => t.textContent).join("");
+const siguiente = (el, tag) => { let n = el.nextSibling; while (n && n.localName !== tag) n = n.nextSibling; return n; };
+function proponer(est, etiqueta, destino, actual, esperado) { // si el texto difiere, lo avisa y deja la edición lista para "Generar"
+  if (actual === esperado) return;
+  est.msgs.push(["AVISO", `${etiqueta}: decía «${actual}»; quedará «${esperado}»`]);
+  est.ediciones.push([...destino, esperado]);
+}
 const plano = s => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
 const DIA = 864e5, BASE = Date.UTC(1899, 11, 30); // las fechas de Excel cuentan días desde el 30-12-1899
@@ -74,8 +91,8 @@ function ponerTextoParrafo(p, nuevo) { // escribe en el primer trozo y vacía el
 }
 const ponerTextoCelda = (tc, nuevo) => ponerTextoParrafo(hijos(tc, "p")[0], nuevo);
 
-function inspeccionarDocx(p, codigo, rev) {
-  const partes = [...codigo.split("-"), rev], est = { codigos: [], filaCajas: null, tabla: [], msgs: [] }, pies = {};
+function inspeccionarDocx(p, codigo, rev, ctx) {
+  const partes = [...codigo.split("-"), rev], est = { codigos: [], filaCajas: null, tabla: [], msgs: [], ediciones: [] }, pies = {}, hdr = nombre => nombre.includes("header");
   for (const nombre of Object.keys(p.datos).filter(n => PARTES_WORD.test(n)).sort()) {
     const raiz = xml(p, nombre);
     if (nombre.includes("footer")) { pies[nombre] = texto(raiz).trim(); continue; }
@@ -84,6 +101,14 @@ function inspeccionarDocx(p, codigo, rev) {
       if (t === `${codigo}-${rev}` || plano(t) === plano(PLACEHOLDER)) {
         est.codigos.push([nombre, par]);
         if (plano(t) === plano(PLACEHOLDER)) est.msgs.push(["AVISO", `${nombre}: decía «${t}»; se escribe el código (estándar Rev C)`]);
+        if (hdr(nombre)) { // en el encabezado, el título es el párrafo con texto justo antes del código
+          const ant = todos(raiz, W, "p").slice(0, todos(raiz, W, "p").indexOf(par)).reverse().find(q => texto(q).trim());
+          if (ant && !plano(texto(ant)).startsWith("aeropuerto desierto")) proponer(est, `${nombre} (título del encabezado)`, [nombre, ant], texto(ant).trim(), ctx.titulo);
+        }
+      }
+      if (nombre === "word/document.xml" && !est.vistoConc && t.length < 60 && plano(t).endsWith("concesion aeropuerto desierto de atacama")) { // línea fija de la carátula
+        est.vistoConc = true;
+        proponer(est, "carátula (línea de concesión)", [nombre, par], t, ctx.concesion);
       }
     }
   }
@@ -95,6 +120,9 @@ function inspeccionarDocx(p, codigo, rev) {
       if (t[0] === "REV." && t[1] === "FECHA") est.tabla = filas.slice(i + 2); // cabecera + fila de subtítulos
     });
   }
+  const filaTitulo = est.filaCajas && siguiente(est.filaCajas, "tr"); // el título va justo debajo de las 8 casillas
+  if (filaTitulo) { const tc = hijos(filaTitulo, "tc")[0]; proponer(est, "carátula (título del documento)", ["word/document.xml", hijos(tc, "p")[0]], texto(tc).trim(), ctx.titulo); }
+  if (!est.vistoConc) est.msgs.push(["AVISO", "no encuentro la línea de concesión en la carátula"]);
   if (!est.codigos.length) est.msgs.push(["ERROR", "no encuentro el código en la carátula ni en los encabezados"]);
   if (!est.filaCajas) est.msgs.push(["ERROR", `las casillas de la carátula no coinciden con ${partes.join("-")}`]);
   if (!est.tabla.length) est.msgs.push(["ERROR", "no encuentro la tabla de revisiones"]);
@@ -107,6 +135,7 @@ function inspeccionarDocx(p, codigo, rev) {
 
 function aplicarDocx(p, est, codigo, rev, nueva, fecha, firmas, libre, ult) {
   const nuevoCodigo = `${codigo}-${nueva}`;
+  for (const [nombre, par, txt] of est.ediciones) { ponerTextoParrafo(par, txt); p.modificados.add(nombre); }
   for (const [nombre, par] of est.codigos) { ponerTextoParrafo(par, nuevoCodigo); p.modificados.add(nombre); }
   ponerTextoCelda(hijos(est.filaCajas, "tc").at(-1), nueva);
   const valores = [nueva, fmt(fecha), ...firmas.map((f, i) => f || est.filas[ult][2 + i])];
@@ -150,18 +179,20 @@ function copiarValor(destino, origen) {
   Array.from(origen.childNodes).forEach(h => destino.appendChild(h.cloneNode(true)));
 }
 
-function inspeccionarXlsx(p, codigo, rev) {
-  const partes = [...codigo.split("-"), rev], ruta = rutaPortada(p), hoja = xml(p, ruta), est = { hoja, ruta, msgs: [] };
+function inspeccionarXlsx(p, codigo, rev, ctx) {
+  const partes = [...codigo.split("-"), rev], ruta = rutaPortada(p), hoja = xml(p, ruta), est = { hoja, ruta, msgs: [], ediciones: [] };
   const comp = "xl/sharedStrings.xml" in p.datos ? hijos(xml(p, "xl/sharedStrings.xml"), "si").map(texto) : [];
   const v = ref => valor(celda(hoja, ref), comp).trim();
   if ([..."BCDEFGHI"].map(c => v(c + "6")).join("|") !== partes.join("|")) est.msgs.push(["ERROR", `las casillas de la fila 6 no coinciden con ${partes.join("-")}`]);
   if (v("B4") !== `${codigo}-${rev}`) est.msgs.push(["AVISO", `B4 decía «${v("B4")}»; se escribe ${codigo}-<nueva> (estándar Rev C)`]);
+  for (const [ref, etiqueta, esperado] of [["B3", "línea de concesión", ctx.concesion], ["B7", "título del documento", ctx.titulo]]) proponer(est, `${etiqueta} (${ref})`, [celda(hoja, ref)], v(ref), esperado);
   est.filas = FILAS_EXCEL.map(r => [..."BCDEF"].map(c => v(c + r)));
   return est;
 }
 
 function aplicarXlsx(p, est, codigo, rev, nueva, fecha, firmas, libre, ult) {
   const hoja = est.hoja, r = FILAS_EXCEL[libre], ant = FILAS_EXCEL[ult];
+  est.ediciones.forEach(([c, txt]) => escribirTexto(c, txt));
   escribirTexto(celda(hoja, "B4"), `${codigo}-${nueva}`);
   escribirTexto(celda(hoja, "I6"), nueva);
   escribirTexto(celda(hoja, `B${r}`), nueva);
@@ -176,9 +207,10 @@ function aplicarXlsx(p, est, codigo, rev, nueva, fecha, firmas, libre, ult) {
 const FORMATOS = { ".docx": [inspeccionarDocx, aplicarDocx], ".xlsx": [inspeccionarXlsx, aplicarXlsx] };
 const hayError = msgs => msgs.some(m => m[0] === "ERROR");
 
-async function verificar(bytes, ext, codigo, rev, nueva, fecha) { // relee el archivo generado
-  const p = await abrir(bytes), est = FORMATOS[ext][0](p, codigo, nueva);
+async function verificar(bytes, ext, codigo, rev, nueva, fecha, ctx) { // relee el archivo generado
+  const p = await abrir(bytes), est = FORMATOS[ext][0](p, codigo, nueva, ctx);
   const msgs = est.msgs.filter(m => m[0] === "ERROR").map(m => ["ERROR", "verificación: " + m[1]]);
+  if (est.ediciones.length) msgs.push(["ERROR", "verificación: el título o la línea de concesión no quedó como se esperaba"]);
   const llenas = est.filas.filter(f => f[0]);
   if (!llenas.length || llenas.at(-1)[0] !== nueva || aFecha(llenas.at(-1)[1]) !== fecha) msgs.push(["ERROR", "verificación: la última fila de la tabla no es la esperada"]);
   if (ext === ".docx") for (const n of restantes(p, `${codigo}-${rev}`)) msgs.push(["AVISO", `${n}: todavía aparece ${codigo}-${rev} dentro de un texto; revísalo a mano`]);
@@ -186,22 +218,34 @@ async function verificar(bytes, ext, codigo, rev, nueva, fecha) { // relee el ar
 }
 
 // procesar(nombre, bytes, {nueva, fecha(ms UTC), firmas:[elab,rev,acep], simular}) -> {nombre, estado, msgs, salida}
-async function procesar(nombre, bytes, { nueva, fecha, firmas = ["", "", ""], simular }) {
+async function procesar(nombre, bytes, { nueva, fecha, firmas = ["", "", ""], simular, dic, concesion }) {
   const ext = nombre.slice(nombre.lastIndexOf(".")).toLowerCase(), m = NOMBRE.exec(nombre.slice(0, -ext.length));
   if (!m) return { nombre, estado: "OMITIDO", msgs: [["AVISO", "el nombre no sigue el formato SCAT-XX-XXX-XXX-XXX-XXX-0000-X"]] };
   const { codigo, rev } = m.groups, [inspeccionar, aplicar] = FORMATOS[ext];
+  const { titulo, falta } = tituloDoc(codigo, dic), ctx = { titulo, concesion };
+  if (falta.length) return { nombre, estado: "ERROR", msgs: [["ERROR", `falta en el diccionario: ${falta.join(", ")}`]] };
   try {
-    const p = await abrir(bytes), est = inspeccionar(p, codigo, rev), t = revisarTabla(est.filas, rev, nueva, fecha);
+    const p = await abrir(bytes), est = inspeccionar(p, codigo, rev, ctx), t = revisarTabla(est.filas, rev, nueva, fecha);
     let msgs = [...est.msgs, ...t.msgs];
     if (hayError(msgs)) return { nombre, estado: "ERROR", msgs };
     if (simular) return { nombre, estado: "OK", msgs };
     aplicar(p, est, codigo, rev, nueva, fecha, firmas, t.libre, t.ult);
     const salida = await guardar(p);
-    msgs = [...msgs, ...(await verificar(salida, ext, codigo, rev, nueva, fecha))];
+    msgs = [...msgs, ...(await verificar(salida, ext, codigo, rev, nueva, fecha, ctx))];
     return { nombre, estado: hayError(msgs) ? "ERROR" : "OK", msgs, salida: { nombre: `${codigo}-${nueva}${ext}`, bytes: salida } };
   } catch (e) {
     return { nombre, estado: "ERROR", msgs: [["ERROR", `no se pudo procesar: ${e}`]] };
   }
+}
+
+async function leerDiccionarioXlsx(bytes) { // primera hoja, columnas NOMBRE y CODIGO -> { CODIGO: NOMBRE }
+  const p = await abrir(bytes), comp = "xl/sharedStrings.xml" in p.datos ? hijos(xml(p, "xl/sharedStrings.xml"), "si").map(texto) : [];
+  const filas = todos(xml(p, "xl/worksheets/sheet1.xml"), M, "row").map(r => { const f = {}; hijos(r, "c").forEach(c => (f[c.getAttribute("r").replace(/\d+/, "")] = valor(c, comp).trim())); return f; });
+  const i = filas.findIndex(f => Object.values(f).some(v => plano(v) === "codigo") && Object.values(f).some(v => plano(v) === "nombre")); // fila de títulos (puede haber filas vacías arriba)
+  if (i < 0) throw new Error("no encuentro las columnas NOMBRE y CODIGO");
+  const col = n => Object.keys(filas[i]).find(k => plano(filas[i][k]) === n), out = {};
+  filas.slice(i + 1).forEach(f => { if (f[col("codigo")]) out[f[col("codigo")].toUpperCase()] = f[col("nombre")] || ""; });
+  return out;
 }
 
 function informe(resultados, simular) { // mismo formato de texto que el script de Python
@@ -215,4 +259,4 @@ function informe(resultados, simular) { // mismo formato de texto que el script 
   return lineas.join("\n");
 }
 
-if (typeof module !== "undefined") module.exports = { procesar, informe, aFecha };
+if (typeof module !== "undefined") module.exports = { procesar, informe, aFecha, leerDiccionarioXlsx, DIC_INICIAL };
