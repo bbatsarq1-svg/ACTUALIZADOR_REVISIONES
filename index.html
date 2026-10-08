@@ -18,6 +18,7 @@
   header.fila::before { display:none; } .logo { font-weight:800; font-size:18px; letter-spacing:-.03em; }
   .dos { display:grid; grid-template-columns:1fr 1fr; gap:28px; } .dos > div:first-child { border-right:var(--punto); padding-right:28px; }
   .btn { font:600 13px/1 "Helvetica Neue",Arial,sans-serif; padding:14px 22px; border:1px dotted var(--tinta); background:#fff; color:var(--tinta); cursor:pointer; }
+  .btn { transition:background .15s; } .btn:hover:not(:disabled) { background:var(--gris); } .btn.rojo:hover:not(:disabled) { background:#e62e0e; }
   .btn.rojo { background:var(--rojo); border:1px solid var(--rojo); color:#fff; } .btn:disabled { opacity:.35; cursor:default; }
   #zona { border:1px dotted var(--tinta); min-height:150px; display:grid; place-items:center; text-align:center; padding:24px; cursor:pointer; }
   #zona.sobre { background:var(--gris); } label { display:block; margin:14px 0 4px; }
@@ -49,6 +50,7 @@
       <h2>1. Archivos</h2><br>
       <div id="zona" class="mono">Arrastra aquí los .docx y .xlsx<br>o haz clic para elegirlos<div id="cuenta" style="margin-top:10px;color:var(--rojo)"></div></div>
       <input id="elegir" type="file" multiple accept=".docx,.xlsx" hidden>
+      <div class="botones" style="margin-top:12px"><button class="btn" id="refrescar">↻ Refrescar archivos</button></div>
     </div>
     <div>
       <h2>2. Revisión</h2>
@@ -117,6 +119,12 @@
   $("#zona").ondragover = e => { e.preventDefault(); $("#zona").classList.add("sobre"); };
   $("#zona").ondragleave = () => $("#zona").classList.remove("sobre");
   $("#zona").ondrop = e => { e.preventDefault(); $("#zona").classList.remove("sobre"); agregar(e.dataTransfer.files); };
+
+  $("#refrescar").onclick = () => {
+    archivos = []; $("#cuenta").textContent = ""; $("#elegir").value = ""; $("#error").textContent = "";
+    ["#nOk", "#nErr", "#nOmi"].forEach(id => ($(id).textContent = "0"));
+    $("#fichas").hidden = $("#informe").hidden = true;
+  };
 
   async function ejecutar(simular) {
     $("#error").textContent = "";
